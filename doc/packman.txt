@@ -1,0 +1,120 @@
+*packman.txt*  vim.pack plugin manager picker
+
+==============================================================================
+CONTENTS                                                     *packman-contents*
+
+  1. Introduction ........................... |packman-intro|
+  2. Commands and mappings .................. |:Packman|
+  3. Picker keys ............................ |packman-keys|
+  4. Configuration .......................... |packman-config|
+  5. Highlights ............................. |packman-highlights|
+  6. Lua API ................................ |packman-api|
+  7. Troubleshooting ........................ |packman-health|
+
+==============================================================================
+1. INTRODUCTION                                                 *packman-intro*
+
+packman.nvim lists every |vim.pack| plugin in a snacks.nvim picker, modeled
+on lazy.nvim's UI. Pending updates are listed first. The preview shows the
+plugin's description, status, source, path, version, revision, pending
+update with its commits, branches, tags, required Neovim, scripts and
+`spec.data`.
+
+Requirements: Neovim 0.12+, snacks.nvim and git. Checking for updates and
+diffing need Neovim 0.13+ (`vim.pack.get()` with `offline` and `rev_to`);
+on 0.12 their keys are hidden.
+
+When packcount.nvim is installed, every picker action passes the fresh
+revisions to `packcount.set()`, so its statusline count agrees with the
+picker.
+
+No `setup()` call is needed. Set `vim.g.loaded_packman = true` before
+plugins load to disable it.
+
+==============================================================================
+2. COMMANDS AND MAPPINGS                                            *:Packman*
+
+:Packman [open]         Open the picker.
+:Packman check          Open the picker and check every plugin for updates
+                        right away, as `C` does. Pending updates are listed
+                        first; `U` applies them. 0.13+, on 0.12 only opens.
+:Packman log            Open the vim.pack update log
+                        (`stdpath('log')/nvim-pack.log`) at its end.
+
+                                                          *<Plug>(Packman)*
+                                                     *<Plug>(PackmanCheck)*
+                                                       *<Plug>(PackmanLog)*
+Normal-mode mappings for the subcommands. packman sets no keys itself:
+>lua
+    vim.keymap.set('n', '<leader>l', '<Plug>(Packman)')
+<
+==============================================================================
+3. PICKER KEYS                                                   *packman-keys*
+
+Uppercase acts on all plugins, lowercase on the selected plugins or the one
+under the cursor. vim.pack calls block the editor while they run; a spinner
+marks the affected rows.
+
+    C  c        Check for updates (fetch). 0.13+.
+    U  u        Update to the latest allowed version. When every
+                plugin to update was checked (`C`, or `c` on them),
+                updates reuse the fetched revisions without downloading.
+    R  r        Restore to the lockfile revision.
+    x           Delete from disk, after confirming.
+    d  <CR>     Diff the pending update in a floating terminal. 0.13+.
+    L           Open the update log.
+    gx          Open the repository in a browser. ssh sources
+                (`git@host:path`) open as https, shorthands like
+                `gh:user/repo` are reported instead.
+
+==============================================================================
+4. CONFIGURATION                                               *packman-config*
+                                                                 *g:packman*
+`vim.g.packman` is a table, read when the picker first opens, so it can be
+set anywhere in your config. An invalid value is reported once and the
+defaults are used. `:checkhealth packman` shows the error and unknown keys.
+
+picker          (table, default `{}`) Deep-merged over the snacks picker
+                spec: layout, title, keys, actions. Keys live in
+                `win.list.keys`, `false` unbinds one. The preview footer
+                shows the keys that end up bound.
+>lua
+    vim.g.packman = {
+      picker = {
+        win = { list = { keys = { x = false, D = 'pack_delete' } } },
+      },
+    }
+<
+Actions: `pack_check_all`, `pack_check`, `pack_update_all`, `pack_update`,
+`pack_restore_all`, `pack_restore`, `pack_delete`, `pack_diff`, `pack_log`,
+`pack_browse`.
+
+==============================================================================
+5. HIGHLIGHTS                                              *packman-highlights*
+
+PackmanUpdate       Bullet and revision of a pending update.
+                    Default: links to |hl-Type|.
+PackmanBusy         Spinner and status while a row is being updated.
+                    Default: links to |hl-DiagnosticInfo|.
+
+Both are defined with `default = true` at startup and on |ColorScheme|, so
+a colorscheme or your config can override them.
+
+==============================================================================
+6. LUA API                                                        *packman-api*
+
+require('packman').open({opts})                              *packman.open()*
+    Open the picker. {opts} is optional:
+    - check: (boolean) fetch every plugin's remote right away, as `C`
+      does (Neovim 0.13+).
+
+require('packman').log()                                      *packman.log()*
+    Open the update log.
+
+==============================================================================
+7. TROUBLESHOOTING                                             *packman-health*
+
+Run `:checkhealth packman` to check snacks.nvim, the Neovim version, git,
+`vim.g.packman` and the packcount.nvim integration.
+
+ vim:tw=78:ts=8:noet:ft=help:norl:
