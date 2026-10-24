@@ -29,36 +29,60 @@ local function pager_env(cwd)
 	return env
 end
 
--- Floating terminal with `git diff rev rev_to` for a pending update.
+-- Revisions to diff: the pending update (`rev rev_to`), else the last
+-- change to HEAD (`@{1} HEAD`, HEAD's previous position in the reflog).
+-- Returns nil and a message when neither moved anything.
+---@param plugin vim.pack.PlugData
+---@return string[]? refs `git diff` arguments.
+---@return string title Short revisions, or the message.
+local function diff_refs(plugin)
+	if Pack.has_update(plugin) then
+		return { plugin.rev, plugin.rev_to },
+			('%s..%s'):format(plugin.rev:sub(1, 7), plugin.rev_to:sub(1, 7))
+	end
+	local none = plugin.spec.name .. ' has no pending or recent updates'
+	local ok, out = pcall(function()
+		return vim
+			.system(
+				{ 'git', 'rev-parse', 'HEAD', '@{1}' },
+				{ cwd = plugin.path, text = true }
+			)
+			:wait()
+	end)
+	-- No reflog entry, or the previous HEAD is the same commit (e.g. the
+	-- clone's checkout).
+	local revs = ok and out.code == 0 and vim.split(vim.trim(out.stdout), '\n')
+	if not revs or #revs ~= 2 or revs[1] == revs[2] then
+		return nil, none
+	end
+	return { '@{1}', 'HEAD' },
+		('%s..%s'):format(revs[2]:sub(1, 7), revs[1]:sub(1, 7))
+end
+
+-- Floating terminal with `git diff` of the refs from `diff_refs()`.
 -- Quitting the pager early kills git with SIGPIPE (141), so closing is
 -- handled here: snacks' auto_close treats any non-zero code as an error.
 ---@param plugin vim.pack.PlugData
 function M.diff(plugin)
-	if not Pack.has_update(plugin) then
-		vim.notify(plugin.spec.name .. ' has no pending updates')
+	local refs, title = diff_refs(plugin)
+	if not refs then
+		vim.notify(title)
 		return
 	end
-	local term = Snacks.terminal.open(
-		{ 'git', 'diff', plugin.rev, plugin.rev_to },
-		{
-			cwd = plugin.path,
-			env = pager_env(plugin.path),
-			auto_close = false,
-			win = {
-				position = 'float',
-				border = vim.o.winborder,
-				width = 0.85,
-				height = 0.85,
-				-- Above the picker.
-				zindex = Snacks.win.zindex(),
-				title = (' %s %s..%s '):format(
-					plugin.spec.name,
-					plugin.rev:sub(1, 7),
-					plugin.rev_to:sub(1, 7)
-				),
-			},
-		}
-	)
+	local term = Snacks.terminal.open(vim.list_extend({ 'git', 'diff' }, refs), {
+		cwd = plugin.path,
+		env = pager_env(plugin.path),
+		auto_close = false,
+		win = {
+			position = 'float',
+			border = vim.o.winborder,
+			width = 0.85,
+			height = 0.85,
+			-- Above the picker.
+			zindex = Snacks.win.zindex(),
+			title = (' %s %s '):format(plugin.spec.name, title),
+		},
+	})
 	-- Close on success or SIGPIPE; otherwise keep git's output and notify.
 	term:on('TermClose', function()
 		local status = vim.v.event.status

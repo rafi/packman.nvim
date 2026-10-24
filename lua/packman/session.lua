@@ -5,11 +5,18 @@
 
 local Pack = require('packman.pack')
 
+-- A revision change from an update or restore.
+---@class packman.Change
+---@field action 'updated'|'restored'
+---@field from string Revision before.
+---@field to string Revision after.
+
 ---@class packman.Session
 ---@field plugins vim.pack.PlugData[] Listed plugins, refreshed after every operation.
 ---@field busy boolean A vim.pack call is running.
 ---@field checked table<string, true> Plugins whose remote was fetched; updating only these skips downloading.
 ---@field working table<string, string> Rows being changed, mapped to their status label.
+---@field changed table<string, packman.Change> Plugins whose revision an update or restore moved in this session.
 local Session = {}
 Session.__index = Session
 
@@ -22,6 +29,7 @@ function Session.new()
 		busy = false,
 		checked = {},
 		working = {},
+		changed = {},
 	}, Session)
 end
 
@@ -187,13 +195,32 @@ function Session:update(picker, names, target)
 	local status = target == 'lockfile' and 'restoring' or 'updating'
 	local rows = names or self:names()
 	self:run(picker, status, function()
+		local before = {} ---@type table<string, string>
+		for _, plugin in ipairs(self.plugins) do
+			before[plugin.spec.name] = plugin.rev
+		end
 		vim.pack.update(names, {
 			force = true,
 			target = target,
 			offline = target == 'lockfile' or self:all_checked(rows),
 		})
 		self.plugins = Pack.read_plugins()
+		self:mark_changed(before, target == 'lockfile' and 'restored' or 'updated')
 	end, rows)
+end
+
+-- Records the plugins whose revision moved from `before`. Only the last
+-- move counts, as git's `@{1}` (previous HEAD) does.
+---@param before table<string, string> Revisions by name.
+---@param action 'updated'|'restored'
+function Session:mark_changed(before, action)
+	for _, plugin in ipairs(self.plugins) do
+		local from = before[plugin.spec.name]
+		if from and from ~= plugin.rev then
+			self.changed[plugin.spec.name] =
+				{ action = action, from = from, to = plugin.rev }
+		end
+	end
 end
 
 -- Deletes `names` from disk after a confirmation: vim.pack.del() refuses

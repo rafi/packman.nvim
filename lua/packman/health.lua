@@ -18,11 +18,11 @@ function M.check()
 	if vim.fn.has('nvim-0.12') == 0 then
 		health.error('Neovim 0.12+ required: vim.pack is missing')
 	elseif vim.fn.has('nvim-0.13') == 1 then
-		health.ok('Neovim 0.13+: checking and diffing updates are available')
+		health.ok('Neovim 0.13+: checking for updates is available')
 	else
 		health.warn(
 			'Neovim 0.12: vim.pack cannot check for updates',
-			'Update, restore, delete and log still work'
+			'Update, restore, delete, diff of the last update and log still work'
 		)
 	end
 	if vim.fn.executable('git') == 1 then

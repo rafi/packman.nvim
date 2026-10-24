@@ -325,6 +325,145 @@ T['picker']['previews pending commits'] = function()
 	H.eq(child.lua_get('_G.msgs'), {})
 end
 
+-- Text of the open picker's `win` buffer ('list' or 'preview') once it
+-- contains `want`.
+---@param win 'list'|'preview'
+---@param want string
+---@return string
+local function picker_text(win, want)
+	return child.lua(
+		[[
+		local win, want = ...
+		local text = ''
+		vim.wait(5000, function()
+			local picker = Snacks.picker.get()[1]
+			local buf = picker and picker[win].win.buf
+			if buf then
+				text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
+			end
+			return text:find(want, 1, true) ~= nil
+		end, 20)
+		return text
+	]],
+		{ win, want }
+	)
+end
+
+-- A temp git repo with `count` empty commits `feat: change <n>`, and a git
+-- runner in it that returns stdout.
+---@param count integer
+---@return string repo
+---@return fun(...: string): string git
+local function make_repo(count)
+	local repo = vim.fn.tempname()
+	vim.fn.mkdir(repo, 'p')
+	local function git(...)
+		local out = vim.system({ 'git', ... }, { cwd = repo, text = true }):wait()
+		assert(out.code == 0, out.stderr)
+		return vim.trim(out.stdout)
+	end
+	git('init', '--quiet')
+	for i = 1, count do
+		-- stylua: ignore
+		git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet',
+			'--allow-empty', '-m', 'feat: change ' .. i)
+	end
+	return repo, git
+end
+
+-- Updating a plugin labels its row with the new revision, lists it after
+-- pending updates and before the rest, previews the commits it brought in
+-- (`@{1}..HEAD`) and diffs `@{1}` against HEAD. vim.pack is stubbed over a
+-- local repo whose update checks out 2 commits ahead. `a-plain` and
+-- `z-pending` share the repo with fixed revisions.
+T['picker']['shows what an update brought in'] = function()
+	start_child(true)
+	local repo, git = make_repo(3)
+	local new = git('rev-parse', 'HEAD')
+	git('checkout', '--quiet', 'HEAD~2')
+	local old = git('rev-parse', 'HEAD')
+	child.lua(
+		[[
+		local repo, old, new = ...
+		local function plugin(name, rev, rev_to)
+			return {
+				spec = { name = name, src = repo },
+				path = repo,
+				rev = rev,
+				rev_to = rev_to,
+				active = false,
+			}
+		end
+		vim.pack.get = function()
+			local out = vim.system({ 'git', 'rev-parse', 'HEAD' }, { cwd = repo }):wait()
+			local rev = vim.trim(out.stdout)
+			return {
+				plugin('a-plain', new, new),
+				plugin('fake', rev, rev),
+				plugin('z-pending', old, new),
+			}
+		end
+		vim.pack.update = function()
+			vim.system({ 'git', 'checkout', '--quiet', new }, { cwd = repo }):wait()
+		end
+		Snacks.terminal.open = function(cmd)
+			_G.diffed = cmd
+			return { on = function() end }
+		end
+		-- Puts the cursor on the row of plugin `name`.
+		_G.focus = function(name)
+			local picker = Snacks.picker.get()[1]
+			for i, item in ipairs(picker:items()) do
+				if item.text == name then
+					picker.list:move(i, true)
+				end
+			end
+		end
+	]],
+		{ repo, old, new }
+	)
+	child.cmd('Packman')
+	H.eq(picker_names('fake'), { 'z-pending', 'a-plain', 'fake' })
+	child.lua([[_G.focus('fake')]])
+	child.lua([[Snacks.picker.get()[1]:action('pack_update')]])
+	wait_idle()
+	H.eq(picker_names('fake'), { 'z-pending', 'fake', 'a-plain' })
+	child.lua([[_G.focus('fake')]])
+	local label = 'updated → ' .. new:sub(1, 7)
+	H.eq(picker_text('list', label):find(label, 1, true) ~= nil, true)
+	local text = picker_text('preview', 'New commits')
+	H.eq(text:find('(2 new commits)', 1, true) ~= nil, true)
+	H.eq(text:find('change 3', 1, true) ~= nil, true)
+	H.eq(text:find('change 1', 1, true) == nil, true)
+	child.lua([[Snacks.picker.get()[1]:action('pack_diff')]])
+	H.eq(child.lua_get('_G.diffed'), { 'git', 'diff', '@{1}', 'HEAD' })
+	H.eq(child.lua_get('_G.msgs'), {})
+	vim.fn.delete(repo, 'rf')
+end
+
+-- Diffing a plugin whose HEAD didn't move since its clone (the checkout
+-- after it stays on the same commit) notifies instead of opening an empty
+-- diff.
+T['picker']['diff without changes notifies'] = function()
+	start_child(true)
+	local repo, git = make_repo(1)
+	git('checkout', '--quiet', '--detach')
+	child.lua(
+		[[
+		Snacks.terminal.open = function() _G.diffed = true end
+		require('packman.float').diff({
+			spec = { name = 'fake' },
+			path = ...,
+			rev = 'abc',
+		})
+	]],
+		{ repo }
+	)
+	H.eq(child.lua_get('_G.diffed'), vim.NIL)
+	H.eq(child.lua_get('_G.msgs'), { 'fake has no pending or recent updates' })
+	vim.fn.delete(repo, 'rf')
+end
+
 T['config'] = MiniTest.new_set()
 
 -- Lines of `:checkhealth packman`.

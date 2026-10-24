@@ -15,14 +15,16 @@ CONTENTS                                                     *packman-contents*
 1. INTRODUCTION                                                 *packman-intro*
 
 packman.nvim lists every |vim.pack| plugin in a snacks.nvim picker, modeled
-on lazy.nvim's UI. Pending updates are listed first. The preview shows the
-plugin's description, status, source, path, version, revision, pending
-update with its commits, branches, tags, required Neovim, scripts and
-`spec.data`.
+on lazy.nvim's UI. Pending updates are listed first, then plugins updated
+or restored in the picker, which end with `updated → <rev>` or
+`restored → <rev>`. The preview shows the plugin's description, status,
+source, path, version, revision, pending update with its commits, the
+commits its last update in the picker brought in (`git log @{1}..HEAD`),
+branches, tags, required Neovim, scripts and `spec.data`.
 
-Requirements: Neovim 0.12+, snacks.nvim and git. Checking for updates and
-diffing need Neovim 0.13+ (`vim.pack.get()` with `offline` and `rev_to`);
-on 0.12 their keys are hidden.
+Requirements: Neovim 0.12+, snacks.nvim and git. Checking for updates needs
+Neovim 0.13+ (`vim.pack.get()` with `offline` and `rev_to`); on 0.12 its
+keys are hidden.
 
 When packcount.nvim is installed, every picker action passes the fresh
 revisions to `packcount.set()`, so its statusline count agrees with the
@@ -61,7 +63,9 @@ marks the affected rows.
                 updates reuse the fetched revisions without downloading.
     R  r        Restore to the lockfile revision.
     x           Delete from disk, after confirming.
-    d  <CR>     Diff the pending update in a floating terminal. 0.13+.
+    d  <CR>     Diff the pending update in a floating terminal. With no
+                pending update, diff the last change to the plugin's
+                HEAD instead (`git diff @{1} HEAD`), e.g. its last update.
     L           Open the update log.
     gx          Open the repository in a browser. ssh sources
                 (`git@host:path`) open as https, shorthands like

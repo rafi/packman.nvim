@@ -4,15 +4,17 @@ A [`vim.pack`](https://neovim.io/doc/user/pack.html#vim.pack) plugin
 manager UI modeled on lazy.nvim's, built on the
 [snacks.nvim](https://github.com/folke/snacks.nvim) picker.
 
-- Lists every plugin: loaded or not, pending updates first.
+- Lists every plugin: loaded or not, pending updates first. Plugins updated
+  or restored in the picker come next, labeled with their new revision.
 - Preview: description, source, path, version, revision, pending update
-  with its commits, branches, tags, required Neovim, `spec.data`.
+  with its commits, the commits the last update brought in, branches,
+  tags, required Neovim, `spec.data`.
 - Check, update, restore to the lockfile, delete, diff, update log.
 - Keeps [packcount.nvim](https://github.com/rafi/packcount.nvim)'s count in
   sync when it's installed.
 
-Requires Neovim 0.12+, snacks.nvim and git. Checking for updates and
-diffing need Neovim 0.13+; on 0.12 they are hidden.
+Requires Neovim 0.12+, snacks.nvim and git. Checking for updates needs
+Neovim 0.13+; on 0.12 it is hidden.
 
 ## Install
 
@@ -42,7 +44,7 @@ In the picker, uppercase acts on all plugins, lowercase on the selection
 | `U` / `u` | Update |
 | `R` / `r` | Restore to the lockfile revision |
 | `x` | Delete from disk (asks first) |
-| `d`, `<CR>` | Diff the pending update in a terminal |
+| `d`, `<CR>` | Diff the pending update in a terminal, else the last update (`git diff @{1} HEAD`) |
 | `L` | Update log |
 | `gx` | Open the repository (ssh sources open as https) |
 

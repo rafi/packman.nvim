@@ -1,5 +1,5 @@
 -- packman: the picker's preview, a plugin's vim.pack data as labeled,
--- colored rows followed by its pending commits.
+-- colored rows followed by its pending or new commits.
 -- https://github.com/rafi/packman.nvim
 
 local Pack = require('packman.pack')
@@ -95,20 +95,21 @@ local function parse_commits(out, picker)
 	return ret
 end
 
--- Pending commits (`git log rev..rev_to`), one line each, colored like
+-- Commits in `range` (e.g. `rev..rev_to`), one line each, colored like
 -- snacks' git log: hash, date, conventional-commit message, author.
 -- git runs in the background, `cb` gets the rows on the main loop.
 ---@param plugin vim.pack.PlugData
+---@param range string
 ---@param picker snacks.Picker
 ---@param cb fun(commits: snacks.picker.Highlight[][])
-function M.commits(plugin, picker, cb)
+function M.commits(plugin, range, picker, cb)
 	local cmd = {
 		'git',
 		'log',
 		'--no-show-signature',
 		'--abbrev=7',
 		'--pretty=format:%h %cs %an%x09%s',
-		plugin.rev .. '..' .. plugin.rev_to,
+		range,
 	}
 	local ok, err = pcall(
 		vim.system,
@@ -127,11 +128,13 @@ function M.commits(plugin, picker, cb)
 end
 
 -- Preview lines: the plugin's vim.pack data as labeled, colored rows, then
--- its pending commits from `M.commits()`, nil while git runs.
+-- its commits from `M.commits()`, nil while git runs: pending ones when it
+-- has an update, else the ones `change` brought in.
 ---@param plugin vim.pack.PlugData
 ---@param commits? snacks.picker.Highlight[][]
+---@param change? packman.Change
 ---@return snacks.picker.Highlight[][]
-function M.lines(plugin, commits)
+function M.lines(plugin, commits, change)
 	local spec = plugin.spec
 	local manifest = plugin.manifest or {}
 	local lines = {} ---@type snacks.picker.Highlight[][]
@@ -161,11 +164,25 @@ function M.lines(plugin, commits)
 
 	lines[#lines + 1] =
 		row('Revision', { { plugin.rev:sub(1, 7), 'SnacksPickerGitCommit' } })
+	local pending = Pack.has_update(plugin)
+	if change then
+		local value = {
+			{ change.from:sub(1, 7), 'SnacksPickerGitCommit' },
+			{ ' → ', 'SnacksPickerDelim' },
+			{ change.to:sub(1, 7), 'DiagnosticOk' },
+		}
+		if commits and not pending then
+			value[#value + 1] =
+				{ (' (%d new commits)'):format(#commits), 'SnacksPickerComment' }
+		end
+		local label = change.action == 'restored' and 'Restored' or 'Updated'
+		lines[#lines + 1] = row(label, value)
+	end
 	if Pack.can_check then
 		local update ---@type snacks.picker.Highlight[]
 		if plugin.rev_to == nil then
 			update = { { 'not checked', 'SnacksPickerComment' } }
-		elseif not Pack.has_update(plugin) then
+		elseif not pending then
 			update = { { 'up to date', 'DiagnosticOk' } }
 		else
 			update = {
@@ -206,7 +223,8 @@ function M.lines(plugin, commits)
 
 	if commits and #commits > 0 then
 		lines[#lines + 1] = {}
-		lines[#lines + 1] = { { ' Pending commits', 'Title' } }
+		local title = pending and ' Pending commits' or ' New commits'
+		lines[#lines + 1] = { { title, 'Title' } }
 		vim.list_extend(lines, commits)
 	end
 	return lines

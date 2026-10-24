@@ -91,7 +91,7 @@ local function layout(list_keys)
 end
 
 -- List keys: uppercase acts on all plugins, lowercase on the selection or
--- the cursor. Checking and diffing need Neovim 0.13+.
+-- the cursor. Checking needs Neovim 0.13+.
 ---@return table<string, table>
 local function keys()
 	-- stylua: ignore
@@ -103,33 +103,43 @@ local function keys()
 		['R'] = { 'pack_restore_all', desc = 'Restore All to Lockfile' },
 		['r'] = { 'pack_restore', desc = 'Restore to Lockfile' },
 		['x'] = { 'pack_delete', desc = 'Delete' },
-		['d'] = { 'pack_diff', desc = 'Diff Pending Update' },
+		['d'] = { 'pack_diff', desc = 'Diff Pending or Last Update' },
 		['L'] = { 'pack_log', desc = 'Update Log' },
 		['gx'] = { 'pack_browse', desc = 'Open Repository' },
 	}
 	if not Pack.can_check then
-		ret['C'], ret['c'], ret['d'] = nil, nil, nil
+		ret['C'], ret['c'] = nil, nil
 	end
 	return ret
 end
 
--- Picker items, pending updates first, then by name.
----@param plugins vim.pack.PlugData[]
+-- Sort group of an item: pending update, then updated or restored in this
+-- session, then the rest.
+---@param item snacks.picker.finder.Item
+---@return integer
+local function rank(item)
+	return item.update and 1 or item.change and 2 or 3
+end
+
+-- Picker items, pending updates first, then plugins this session updated
+-- or restored, each group by name.
+---@param session packman.Session
 ---@return snacks.picker.finder.Item[]
-local function to_items(plugins)
+local function to_items(session)
 	local items = {} ---@type snacks.picker.finder.Item[]
-	for _, plugin in ipairs(plugins) do
+	for _, plugin in ipairs(session.plugins) do
 		items[#items + 1] = {
 			text = plugin.spec.name,
 			file = plugin.path,
 			dir = true,
 			plugin = plugin,
 			update = Pack.has_update(plugin),
+			change = session.changed[plugin.spec.name],
 		}
 	end
 	table.sort(items, function(a, b)
-		if a.update ~= b.update then
-			return a.update
+		if rank(a) ~= rank(b) then
+			return rank(a) < rank(b)
 		end
 		return a.text:lower() < b.text:lower()
 	end)
@@ -137,7 +147,8 @@ local function to_items(plugins)
 end
 
 -- A list row. Bullet: spinner while busy, orange for a pending update,
--- else hollow and colored by whether the plugin is loaded.
+-- else hollow and colored by whether the plugin is loaded. Plugins this
+-- session updated or restored end with the action and new revision.
 ---@param item snacks.picker.Item
 ---@param session packman.Session
 ---@return snacks.picker.Highlight[]
@@ -160,6 +171,11 @@ local function format(item, session)
 			'SnacksPickerComment',
 		}
 	end
+	local change = item.change ---@type packman.Change?
+	if change and not status then
+		ret[#ret + 1] = { '  ' .. change.action .. ' → ', 'SnacksPickerComment' }
+		ret[#ret + 1] = { change.to:sub(1, 7), 'DiagnosticOk' }
+	end
 	if status then
 		ret[#ret + 1] = { '  ' .. status .. '…', 'PackmanBusy' }
 	end
@@ -167,14 +183,18 @@ local function format(item, session)
 end
 
 -- Renders an item's preview. Lines are built once per item, and again when
--- its pending commits arrive from git. Items are rebuilt on every refresh,
--- so they never go stale.
+-- its commits arrive from git: pending ones (`rev..rev_to`), else the ones
+-- its last update in this session brought in (`@{1}..HEAD`, HEAD's
+-- previous position). Items are rebuilt on every refresh, so they never go
+-- stale.
 ---@param ctx snacks.picker.preview.ctx
 local function preview(ctx)
 	local item, picker = ctx.item, ctx.picker
-	if item.update and not item.commits and not item.loading then
+	local range = item.update and item.plugin.rev .. '..' .. item.plugin.rev_to
+		or item.change and '@{1}..HEAD'
+	if range and not item.commits and not item.loading then
 		item.loading = true
-		Preview.commits(item.plugin, picker, function(commits)
+		Preview.commits(item.plugin, range, picker, function(commits)
 			item.commits, item.lines = commits, nil
 			if not picker.closed and picker:current({ resolve = false }) == item then
 				picker.preview:show(picker, { force = true })
@@ -184,7 +204,8 @@ local function preview(ctx)
 	ctx.preview:reset()
 	ctx.preview:minimal()
 	ctx.preview:set_title(item.text)
-	item.lines = item.lines or Preview.lines(item.plugin, item.commits)
+	item.lines = item.lines
+		or Preview.lines(item.plugin, item.commits, item.change)
 	Snacks.picker.highlight.render(ctx.buf, ctx.preview:ns(), item.lines)
 	ctx.preview:wo({ wrap = true, linebreak = true, breakindent = true })
 end
@@ -278,14 +299,13 @@ function M.open(opts)
 		focus = 'list',
 		layout = layout(list_keys),
 		finder = function()
-			return to_items(session.plugins)
+			return to_items(session)
 		end,
 		format = function(item)
 			return format(item, session)
 		end,
 		preview = preview,
-		-- Enter diffs; no-op on 0.12, which has no pending updates.
-		confirm = Pack.can_check and 'pack_diff' or function() end,
+		confirm = 'pack_diff',
 		actions = actions(session),
 		win = { list = { keys = keys() } },
 	}, user)
